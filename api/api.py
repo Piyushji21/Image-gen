@@ -1,141 +1,97 @@
-
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request, Form
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 import requests
 import time
-import base64
-import os
 import json
-from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 
-app = FastAPI(title="Kie AI Image Generator API")
+app = FastAPI(title="Prompt2Photo")
 
+# ====================== Kie AI Client ======================
 API_KEY = "084521aaffe2f93d0dde3b72c7c4e08e"
 BASE_URL = "https://api.kie.ai/api/v1"
 UPLOAD_URL = "https://kieai.redpandaai.co/api/file-base64-upload"
 
-class GenerateRequest(BaseModel):
-    prompt: str
-    model: str = "grok-imagine/text-to-image"
-    aspect_ratio: str = "1:1"
-    face_image_base64: Optional[str] = None  # Optional: send base64 directly
-
-@app.get("/")
-def home():
-    return {"message": "Kie AI Image Generator API is running! Use /generate endpoint."}
-
-@app.post("/generate")
-async def generate_image(request: GenerateRequest):
-    client = KieAIClient(API_KEY)
-    
-    face_url = None
-    if request.face_image_base64:
-        # If face is sent as base64, we can upload it (optional enhancement)
-        face_url = client.upload_base64(request.face_image_base64)
-    
-    task_id = client.create_task(
-        prompt=request.prompt,
-        model=request.model,
-        face_url=face_url,
-        aspect_ratio=request.aspect_ratio
-    )
-    
-    if not task_id:
-        raise HTTPException(status_code=500, detail="Failed to create task")
-    
-    image_urls = client.poll_task(task_id)
-    
-    if not image_urls:
-        raise HTTPException(status_code=500, detail="Generation failed or timed out")
-    
-    return JSONResponse({
-        "success": True,
-        "task_id": task_id,
-        "image_urls": image_urls,
-        "prompt": request.prompt
-    })
-
-# ==================== KieAIClient Class (from your previous code) ====================
 class KieAIClient:
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = BASE_URL
-        self.upload_url = UPLOAD_URL
+    def __init__(self):
         self.headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {API_KEY}",
             "Content-Type": "application/json"
         }
 
-    def upload_base64(self, base64_str: str) -> Optional[str]:
-        """Upload base64 image (if provided in request)"""
-        try:
-            payload = {"base64Data": base64_str if base64_str.startswith("data:") else f"data:image/png;base64,{base64_str}"}
-            response = requests.post(self.upload_url, json=payload, headers=self.headers, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("data") or data.get("url")
-        except Exception as e:
-            print(f"Upload failed: {e}")
-            return None
-
-    def create_task(self, prompt: str, model: str = "grok-imagine/text-to-image",
-                    face_url: Optional[str] = None, aspect_ratio: str = "1:1") -> Optional[str]:
-        input_data = {"prompt": prompt, "aspect_ratio": aspect_ratio}
-        if face_url:
-            input_data["face_image"] = face_url
-            input_data["main_face_image"] = face_url
-
+    def create_task(self, prompt: str, aspect_ratio: str = "1:1"):
         payload = {
-            "model": model,
-            "input": input_data,
+            "model": "grok-imagine/text-to-image",
+            "input": {
+                "prompt": prompt,
+                "aspect_ratio": aspect_ratio
+            },
             "callBackUrl": "https://mzpcoieakbomhtvxgftl.supabase.co/functions/v1/kie-callback?secret=kie_cb_2026"
         }
 
         try:
-            response = requests.post(f"{self.base_url}/jobs/createTask", json=payload, headers=self.headers, timeout=30)
-            response.raise_for_status()
-            res = response.json()
-            if res.get("code") == 200:
-                return res.get("data", {}).get("taskId") or res.get("data", {}).get("task_id")
-        except Exception as e:
-            print(f"Create task error: {e}")
+            r = requests.post(f"{BASE_URL}/jobs/createTask", json=payload, headers=self.headers, timeout=20)
+            r.raise_for_status()
+            data = r.json()
+            if data.get("code") == 200:
+                return data.get("data", {}).get("taskId")
+        except:
+            pass
         return None
 
-    def poll_task(self, task_id: str, timeout: int = 180, interval: int = 6) -> List[str]:
+    def poll_task(self, task_id: str):
         start = time.time()
-        while time.time() - start < timeout:
+        while time.time() - start < 180:
             try:
-                response = requests.get(
-                    f"{self.base_url}/jobs/recordInfo",
-                    params={"taskId": task_id},
-                    headers=self.headers,
-                    timeout=30
-                )
-                response.raise_for_status()
-                res = response.json()
-                if res.get("code") == 200:
-                    data = res.get("data", {})
-                    state = data.get("state") or data.get("status", "").lower()
-
+                r = requests.get(f"{BASE_URL}/jobs/recordInfo", 
+                               params={"taskId": task_id}, 
+                               headers=self.headers, timeout=20)
+                data = r.json()
+                if data.get("code") == 200:
+                    state = data.get("data", {}).get("state")
                     if state == "success":
-                        result_str = data.get("resultJson") or "{}"
+                        result_str = data.get("data", {}).get("resultJson", "{}")
                         try:
-                            result_data = json.loads(result_str) if isinstance(result_str, str) else result_str
+                            result = json.loads(result_str)
+                            urls = result.get("resultUrls") or result.get("result_urls") or []
+                            return urls[0] if urls else None
                         except:
-                            result_data = {}
-                        
-                        urls = (result_data.get("resultUrls") or 
-                                result_data.get("result_urls") or 
-                                result_data.get("images") or [])
-                        if urls:
-                            return urls if isinstance(urls, list) else [urls]
-                    elif state in ["fail", "error", "failed"]:
-                        return []
+                            return None
             except:
                 pass
-            time.sleep(interval)
-        return []
+            time.sleep(5)
+        return None
+
+client = KieAIClient()
+
+# ====================== Web Pages ======================
+templates = Jinja2Templates(directory="templates")
+
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+@app.post("/generate")
+async def generate(prompt: str = Form(...)):
+    if not prompt or len(prompt.strip()) < 2:
+        return JSONResponse({"error": "Please enter a valid prompt"}, status_code=400)
+
+    task_id = client.create_task(prompt.strip())
+    if not task_id:
+        return JSONResponse({"error": "Failed to create generation task"}, status_code=500)
+
+    image_url = client.poll_task(task_id)
+    
+    if image_url:
+        return JSONResponse({
+            "success": True,
+            "image_url": image_url,
+            "prompt": prompt
+        })
+    else:
+        return JSONResponse({"error": "Generation timed out or failed"}, status_code=500)
 
 # For local testing
 if __name__ == "__main__":
