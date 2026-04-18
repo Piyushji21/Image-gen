@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prompt2Photo - Make AI Images</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #0f0f23, #1a1a3e);
+      color: white;
+      margin: 0;
+      padding: 20px;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 800px;
+      margin: 40px auto;
+      text-align: center;
+    }
+    h1 {
+      font-size: 2.8rem;
+      margin-bottom: 10px;
+      background: linear-gradient(90deg, #a78bfa, #f472b6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .input-box {
+      width: 100%;
+      padding: 18px 20px;
+      font-size: 1.1rem;
+      border: none;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.1);
+      color: white;
+      margin: 20px 0;
+    }
+    .input-box:focus {
+      outline: 2px solid #a78bfa;
+    }
+    button {
+      padding: 14px 40px;
+      font-size: 1.2rem;
+      background: #7c3aed;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+    button:hover {
+      background: #6d28d9;
+      transform: translateY(-2px);
+    }
+    .result {
+      margin-top: 40px;
+      padding: 20px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 16px;
+    }
+    img {
+      max-width: 100%;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      margin-top: 15px;
+    }
+    .link {
+      margin-top: 15px;
+      word-break: break-all;
+      font-size: 0.95rem;
+      opacity: 0.9;
+    }
+    .loading {
+      display: none;
+      color: #a78bfa;
+      font-size: 1.1rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Prompt2Photo</h1>
+    <p>Enter a prompt and generate beautiful images with Grok Imagine</p>
+
+    <form id="form">
+      <input type="text" id="prompt" class="input-box" placeholder="Enter prompt (e.g. make bird)" required>
+      <button type="submit">Generate Image</button>
+    </form>
+
+    <div id="loading" class="loading">Generating... Please wait (can take 20-60 seconds)</div>
+
+    <div id="result" class="result" style="display: none;">
+      <h2>Generated</h2>
+      <img id="generated-image" src="" alt="Generated Image">
+      <div class="link">
+        <strong>Image Link:</strong><br>
+        <a id="image-link" href="" target="_blank"></a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('form');
+    const loading = document.getElementById('loading');
+    const resultDiv = document.getElementById('result');
+    const image = document.getElementById('generated-image');
+    const link = document.getElementById('image-link');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const prompt = document.getElementById('prompt').value.trim();
+      if (!prompt) return;
+
+      loading.style.display = 'block';
+      resultDiv.style.display = 'none';
+
+      try {
+        const res = await fetch('/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ prompt: prompt })
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          image.src = data.image_url;
+          link.href = data.image_url;
+          link.textContent = data.image_url;
+          resultDiv.style.display = 'block';
+        } else {
+          alert(data.error || "Something went wrong");
+        }
+      } catch (err) {
+        alert("Error connecting to server");
+      } finally {
+        loading.style.display = 'none';
+      }
+    });
+  </script>
+</body>
+</html>
